@@ -1,7 +1,19 @@
+"""Tests for project.py"""
+
 import json
 import os
 
-from project import parse_command, save_conversation, load_conversation, trim_history
+from unittest.mock import patch
+
+import anthropic
+
+from project import (
+    parse_command,
+    save_conversation,
+    load_conversation,
+    trim_history,
+    ChatBot,
+)
 
 SAMPLE_MESSAGES = [
     {"role": "user", "content": "wassup"},
@@ -44,7 +56,7 @@ def test_save_conversation(tmp_path):
     path = os.path.join(tmp_path, "file.json")
     save_conversation(SAMPLE_MESSAGES, path)
 
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         loaded = json.load(f)
 
     assert SAMPLE_MESSAGES == loaded
@@ -61,7 +73,7 @@ def test_saving_into_nonexistent_dir(tmp_path):
 def test_load_conversation(tmp_path):
     path = os.path.join(tmp_path, "file.json")
 
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(SAMPLE_MESSAGES, f)
 
     loaded = load_conversation(path)
@@ -116,3 +128,94 @@ def test_multiple_leading_assistant_entries():
     expected_trimmed_list = []
 
     assert expected_trimmed_list == trim_history(SAMPLE_MESSAGES, 2)
+
+
+def test_send_message_success():
+    with patch("project.get_llm_response") as mock_function:
+        mock_function.return_value = "reply"
+
+        chat_bot = ChatBot()
+        response = chat_bot.send_message("hello")
+
+    assert response == "reply"
+    assert chat_bot.history == [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "reply"},
+    ]
+
+
+def test_send_message_generic_anthropic_error():
+    with patch("project.get_llm_response") as mock_function:
+        mock_function.side_effect = anthropic.AnthropicError("test")
+
+        chat_bot = ChatBot()
+        response = chat_bot.send_message("hello")
+
+    assert response == "Something went wrong: test"
+    assert chat_bot.history == []
+
+
+def test_send_message_empty_response():
+    with patch("project.get_llm_response") as mock_function:
+        mock_function.side_effect = ValueError("test")
+
+        chat_bot = ChatBot()
+        response = chat_bot.send_message("hello")
+
+    assert response == "No response received."
+    assert chat_bot.history == []
+
+
+def test_load_file_not_found(tmp_path, capsys):
+    chat_bot = ChatBot()
+    nonexistent_path = os.path.join(tmp_path, "directory", "file.json")
+    chat_bot.act_based_on_command("/load", nonexistent_path)
+
+    output = capsys.readouterr()
+
+    assert output.out == "File not found.\n"
+    assert chat_bot.history == []
+
+
+def test_load_invalid_json(tmp_path, capsys):
+    chat_bot = ChatBot()
+    path = os.path.join(tmp_path, "file.json")
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("non json text")
+
+    chat_bot.act_based_on_command("/load", path)
+
+    output = capsys.readouterr()
+
+    assert output.out == "The file is not a valid JSON document.\n"
+    assert chat_bot.history == []
+
+
+def test_load_invalid_encoding(tmp_path, capsys):
+    chat_bot = ChatBot()
+    path = os.path.join(tmp_path, "file.json")
+
+    with open(path, "wb") as f:
+        f.write(b"\xff")
+
+    chat_bot.act_based_on_command("/load", path)
+
+    output = capsys.readouterr()
+
+    assert (
+        output.out
+        == "The file does not contain UTF-8, UTF-16 or UTF-32 encoded data.\n"
+    )
+    assert chat_bot.history == []
+
+
+def test_reset_history():
+    chat_bot = ChatBot()
+    chat_bot.history = [
+        {"role": "user", "content": "wassup"},
+        {"role": "assistant", "content": "Hey!"},
+    ]
+    chat_bot.reset_history()
+
+    assert chat_bot.history == []
