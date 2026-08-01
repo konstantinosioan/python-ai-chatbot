@@ -37,6 +37,7 @@ COMMANDS = (
     "/reset: to clear the conversation history and start fresh\n"
     "/quiz: to generate quiz questions based on discussion thus far\n"
     "/explain: to make the chatbot directly explain/answer your current question\n"
+    "/summarise: to make the chatbot generate a summary of the discussion so far\n"
     "/save [filename]: to save the conversation to conversations/[filename] in json format\n"
     "/load [path]: to load a previously saved conversation from given path"
 )
@@ -123,19 +124,18 @@ class ChatBot:
             case "/help":
                 print(COMMANDS)
             case "/quiz":
-                system_prompt = (
-                    SYSTEM_PROMPT
-                    + " For this response, generate a quiz based on the discussion thus far."
+                self.respond_with_instruction(
+                    command, "generate a quiz based on the discussion thus far."
                 )
-                response = self.send_message(command, system_prompt)
-                print(response)
             case "/explain":
-                system_prompt = (
-                    SYSTEM_PROMPT
-                    + " For this response, fully explain the user's question."
+                self.respond_with_instruction(
+                    command, "fully explain the user's question."
                 )
-                response = self.send_message(command, system_prompt)
-                print(response)
+            case "/summarise":
+                self.respond_with_instruction(
+                    command,
+                    "summarise what's been covered in this conversation thus far and what the user should review.",
+                )
             case "/save":
                 if argument is not None:
                     try:
@@ -169,6 +169,17 @@ class ChatBot:
                         print("Conversation successfully loaded from file.")
                 else:
                     print("Please check correct usage with the /help command.")
+
+    def respond_with_instruction(self, command: str, instruction: str) -> None:
+        """
+        Shared helper for commands that need the LLM to do something by building an extended system prompt, sending it and printing the response
+
+        :param command: One of the existing commands; sent as the message content to the LLM
+        :param instruction: The instruction to be concatenated with the base system prompt to produce different behaviour
+        """
+        system_prompt = SYSTEM_PROMPT + " For this response, " + instruction
+        response = self.send_message(command, system_prompt)
+        print(response)
 
 
 def main() -> None:
@@ -232,6 +243,7 @@ def parse_command(user_input: str) -> tuple[str, str | None] | None:
         "/help",
         "/quiz",
         "/explain",
+        "/summarise",
         "/save",
         "/load",
     ):
