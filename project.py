@@ -6,6 +6,7 @@ import anthropic
 
 from anthropic.types import MessageParam
 from dotenv import load_dotenv
+from rag import Retriever
 
 load_dotenv()
 
@@ -19,6 +20,10 @@ CONVERSATIONS_DIR = "conversations/"
 
 # Used to trim the message history to not waste as many tokens
 HISTORY_LIMIT = 30
+
+# Shared user-facing error/hint messages
+API_KEY_ERROR_MESSAGE = "There has been an issue with the API key."
+USAGE_HINT_MESSAGE = "Please check correct usage with the /help command."
 
 # Configure how the AI works
 SYSTEM_PROMPT = (
@@ -39,16 +44,17 @@ COMMANDS = (
     "/explain: to make the chatbot directly explain/answer your current question\n"
     "/summarise: to make the chatbot generate a summary of the discussion so far\n"
     "/save [filename]: to save the conversation to conversations/[filename] in json format\n"
-    "/load [path]: to load a previously saved conversation from given path"
+    "/load [path]: to load a previously saved conversation from given path\n"
+    "/loaddoc [path]: to load a document from given path so questions can be answered based on it"
 )
 
 
 class ChatBot:
-    """The stateful core - Message history, client initialisation, command specific behaviour"""
+    """The stateful core - Message history, client initialisation, retriever/document state, command specific behaviour"""
 
     def __init__(self) -> None:
         """
-        Initialises an empty list for the message history and sets up the client
+        Initialises an empty list for the message history, sets up the client and leaves the retriever unset until a document is loaded
 
         :raise ValueError: If the API key is missing
         """
@@ -56,7 +62,8 @@ class ChatBot:
             raise ValueError("No API key.")
 
         self.history: list[MessageParam] = []
-        self.client = anthropic.Anthropic(api_key=API_KEY)
+        self._client = anthropic.Anthropic(api_key=API_KEY)
+        self.retriever: Retriever | None = None
 
     def send_message(self, message: str, system_prompt: str = SYSTEM_PROMPT) -> str:
         """
@@ -72,7 +79,7 @@ class ChatBot:
 
         # These come from the anthropic's library documentation on handling errors
         try:
-            response = get_llm_response(tmp_list, self.client, system_prompt)
+            response = get_llm_response(tmp_list, self._client, system_prompt)
         except anthropic.AnthropicError as e:
             return explain_llm_error(e)
         except ValueError:
@@ -149,7 +156,7 @@ class ChatBot:
                     else:
                         print("Conversation successfully saved as a JSON file.")
                 else:
-                    print("Please check correct usage with the /help command.")
+                    print(USAGE_HINT_MESSAGE)
             case "/load":
                 if argument is not None:
                     try:
@@ -168,7 +175,24 @@ class ChatBot:
                     else:
                         print("Conversation successfully loaded from file.")
                 else:
-                    print("Please check correct usage with the /help command.")
+                    print(USAGE_HINT_MESSAGE)
+            case "/loaddoc":
+                if argument is not None:
+                    if self.retriever is None:
+                        try:
+                            self.retriever = Retriever()
+                        except ValueError:
+                            print(API_KEY_ERROR_MESSAGE)
+                            return
+
+                    result = self.retriever.index_document(argument)
+
+                    if isinstance(result, str):
+                        print(result)
+                    else:
+                        print("File successfully loaded.")
+                else:
+                    print(USAGE_HINT_MESSAGE)
 
     def respond_with_instruction(self, command: str, instruction: str) -> None:
         """
@@ -187,7 +211,7 @@ def main() -> None:
     try:
         chat_bot = ChatBot()
     except ValueError:
-        print("There has been an issue with the API key.")
+        print(API_KEY_ERROR_MESSAGE)
     else:
         chat_bot.hold_conversation()
 
@@ -246,6 +270,7 @@ def parse_command(user_input: str) -> tuple[str, str | None] | None:
         "/summarise",
         "/save",
         "/load",
+        "/loaddoc",
     ):
         return None
 
@@ -262,7 +287,7 @@ def explain_llm_error(error: anthropic.AnthropicError) -> str:
     if isinstance(error, anthropic.APIConnectionError):
         return "We apologise as the server could not be reached."
     elif isinstance(error, anthropic.AuthenticationError):
-        return "There has been an issue with the API key."
+        return API_KEY_ERROR_MESSAGE
     elif isinstance(error, anthropic.RateLimitError):
         return "We apologise as there's too many requests at the minute."
     elif isinstance(error, anthropic.APIStatusError):
