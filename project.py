@@ -6,7 +6,7 @@ import anthropic
 
 from anthropic.types import MessageParam
 from dotenv import load_dotenv
-from rag import Retriever
+from rag import Retriever, augment_system_prompt
 
 load_dotenv()
 
@@ -67,7 +67,8 @@ class ChatBot:
 
     def send_message(self, message: str, system_prompt: str = SYSTEM_PROMPT) -> str:
         """
-        Sends message to LLM. On success, both the prompt and response get appended to history and the history is trimmed.
+        Sends message to LLM, first grounding the system prompt in the loaded document's content if one exists.
+        On success, both the prompt and response get appended to history and the history is trimmed.
         On failure, it returns an error message without touching the history.
 
         :param message: The prompt from the user
@@ -77,6 +78,9 @@ class ChatBot:
         # Avoids appending a user's message to history if something goes wrong
         tmp_list = self.history + [{"role": "user", "content": message}]
 
+        # Grounds the prompt in the loaded document's content, if one exists
+        system_prompt = self.retrieve_prompt_with_context(message, system_prompt)
+
         # These come from the anthropic's library documentation on handling errors
         try:
             response = get_llm_response(tmp_list, self._client, system_prompt)
@@ -84,10 +88,10 @@ class ChatBot:
             return explain_llm_error(e)
         except ValueError:
             return "No response received."
-        else:
-            self.history.append({"role": "user", "content": message})
-            self.history.append({"role": "assistant", "content": response})
-            self.history = trim_history(self.history, HISTORY_LIMIT)
+
+        self.history.append({"role": "user", "content": message})
+        self.history.append({"role": "assistant", "content": response})
+        self.history = trim_history(self.history, HISTORY_LIMIT)
 
         return response
 
@@ -169,9 +173,7 @@ class ChatBot:
                     except json.JSONDecodeError:
                         print("The file is not a valid JSON document.")
                     except UnicodeDecodeError:
-                        print(
-                            "The file does not contain UTF-8, UTF-16 or UTF-32 encoded data."
-                        )
+                        print("The file is not UTF-8 encoded.")
                     else:
                         print("Conversation successfully loaded from file.")
                 else:
@@ -204,6 +206,26 @@ class ChatBot:
         system_prompt = SYSTEM_PROMPT + " For this response, " + instruction
         response = self.send_message(command, system_prompt)
         print(response)
+
+    def retrieve_prompt_with_context(self, message: str, system_prompt: str) -> str:
+        """
+        Returns system prompt extended with additional context retrieved from loaded document.
+        Falls back to the given system prompt unchanged if no document is loaded or retrieval fails.
+
+        :param message: The user's prompt used as the query for retrieval
+        :param system_prompt: The base system prompt to augment
+        :return: The augmented system prompt if retrieval succeeds; the original system prompt otherwise
+        """
+        if self.retriever is None or not self.retriever.chunks:
+            return system_prompt
+
+        result = self.retriever.retrieve(message)
+
+        # If something fails during retrieval
+        if isinstance(result, str):
+            return system_prompt
+
+        return augment_system_prompt(system_prompt, result)
 
 
 def main() -> None:
@@ -320,7 +342,7 @@ def load_conversation(path: str) -> list[MessageParam]:
     :raise FileNotFoundError: If the file cannot be found
     :raise OSError: If any other thing goes wrong when reading file
     :raise json.JSONDecodeError: If the file is not a valid JSON document
-    :raise UnicodeDecodeError: If the file does not contain UTF-8, UTF-16 or UTF-32 encoded data
+    :raise UnicodeDecodeError: If the file is not UTF-8 encoded
     :return: The message history read from the file
     """
     with open(path, "r", encoding="utf-8") as f:

@@ -2,10 +2,11 @@
 
 import json
 import os
-
 from unittest.mock import patch
 
+import pytest
 import anthropic
+import project
 
 from project import (
     parse_command,
@@ -203,10 +204,7 @@ def test_load_invalid_encoding(tmp_path, capsys):
 
     output = capsys.readouterr()
 
-    assert (
-        output.out
-        == "The file does not contain UTF-8, UTF-16 or UTF-32 encoded data.\n"
-    )
+    assert output.out == "The file is not UTF-8 encoded.\n"
     assert chat_bot.history == []
 
 
@@ -219,3 +217,10 @@ def test_reset_history():
     chat_bot.reset_history()
 
     assert chat_bot.history == []
+
+
+def test_missing_api_key(monkeypatch):
+    monkeypatch.setattr(project, "API_KEY", None)
+
+    with pytest.raises(ValueError):
+        project.ChatBot()
