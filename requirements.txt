@@ -3,3 +3,5 @@ anthropic
 pytest
 voyageai
 numpy
+pypdf
+fpdf2

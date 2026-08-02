@@ -101,7 +101,9 @@ class ChatBot:
 
     def hold_conversation(self) -> None:
         """The main loop: greets, reads user input and skips it if blank and checks for command use or routes to chat"""
-        print("Hello")
+        print(
+            "Welcome to your Socratic study assistant. It will guide you towards the answers to your questions without handing them over. Type /help to see available commands."
+        )
 
         while True:
             user_input = input("Prompt: ").strip()
@@ -223,6 +225,7 @@ class ChatBot:
 
         # If something fails during retrieval
         if isinstance(result, str):
+            print(f"(Couldn't retrieve context from the loaded document: {result})")
             return system_prompt
 
         return augment_system_prompt(system_prompt, result)

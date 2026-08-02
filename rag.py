@@ -5,6 +5,8 @@ import voyageai
 import numpy
 
 from dotenv import load_dotenv
+from pypdf import PdfReader
+from pypdf.errors import FileNotDecryptedError, PyPdfError
 
 load_dotenv()
 
@@ -14,6 +16,9 @@ API_KEY = os.getenv("VOYAGE_API_KEY")
 MODEL = "voyage-4"
 TOP_K = 3
 MAX_CHUNKS = 300
+
+# Caps uploaded pdf size at 20MB
+MAX_PDF_SIZE_BYTES = 20 * 1024 * 1024
 
 
 class Retriever:
@@ -35,19 +40,25 @@ class Retriever:
 
     def index_document(self, path: str) -> None | str:
         """
-        Reads a file from a given path, splits it into chunks, embeds them and stores the chunks/embeddings on success. On failure, it returns an error message
+        Reads a text or PDF file from a given path, splits it into chunks, embeds them and stores the chunks/embeddings on success. On failure, it returns an error message
 
         :param path: The path from which to index
         :return: None on success; friendly error message on failure
         """
         try:
-            text_string = read_file_as_string(path)
+            text_string = read_document_as_string(path)
         except FileNotFoundError:
             return "File not found."
         except PermissionError:
             return "You don't have permission for that."
         except UnicodeDecodeError:
             return "The file is not UTF-8 encoded."
+        except FileNotDecryptedError:
+            return "This PDF is encrypted and could not be read."
+        except PyPdfError:
+            return "This PDF is corrupted or could not be read."
+        except ValueError as e:
+            return str(e)
         except OSError as e:
             return f"Something went wrong with the operation: {e}"
 
@@ -109,7 +120,7 @@ class Retriever:
 
 def read_file_as_string(path: str) -> str:
     """
-    Reads a file's content as a UTF-8 encoded string
+    Reads a file's content as a UTF-8 encoded string and returns a string containing content
 
     :param path: The path from which to read file
     :raise FileNotFoundError: If the file cannot be found
@@ -122,6 +133,54 @@ def read_file_as_string(path: str) -> str:
         file_content = f.read()
 
     return file_content
+
+
+def read_pdf_as_string(path: str) -> str:
+    """
+    Reads a PDF's content and returns a string containing it
+
+    :param path: The path from which to read the PDF
+    :raise FileNotFoundError: If the file cannot be found
+    :raise PermissionError: If user does not have the necessary permissions to read from given path
+    :raise pypdf.errors.FileNotDecryptedError: If an encrypted PDF has not been successfully decrypted
+    :raise pypdf.errors.PyPdfError: If the PDF is corrupted, empty or unreadable
+    :raise OSError: If any other thing goes wrong when reading the file
+    :return: The string containing the PDF's content
+    """
+    reader = PdfReader(path)
+
+    pages_text = "\n\n".join(
+        page.extract_text(extraction_mode="layout") for page in reader.pages
+    )
+
+    return pages_text
+
+
+def read_document_as_string(path: str) -> str:
+    """
+    Reads a document's content as a string, detecting whether it's a PDF or a plain text file and acting appropriately
+
+    :param path: The path from which to read the document
+    :raise ValueError: If the file is a PDF larger than MAX_PDF_SIZE_BYTES
+    :raise FileNotFoundError: If the file cannot be found
+    :raise PermissionError: If user does not have the necessary permissions to read from given path
+    :raise UnicodeDecodeError: If a plain text file is not UTF-8 encoded
+    :raise pypdf.errors.FileNotDecryptedError: If an encrypted PDF has not been successfully decrypted
+    :raise pypdf.errors.PyPdfError: If the PDF is corrupted, empty or unreadable
+    :raise OSError: If any other thing goes wrong when reading the file
+    :return: The string containing the document's content
+    """
+    with open(path, "rb") as f:
+        header = f.read(5)
+        is_pdf = header == b"%PDF-"
+
+    if is_pdf:
+        if os.path.getsize(path) > MAX_PDF_SIZE_BYTES:
+            raise ValueError("The PDF is too large to index.")
+
+        return read_pdf_as_string(path)
+
+    return read_file_as_string(path)
 
 
 def split_text_into_chunks(text: str) -> list[str]:
@@ -187,6 +246,8 @@ def augment_system_prompt(system_prompt: str, chunks: list[str]) -> str:
         + "\n\n".join(chunks)
         + "\n\n"
         + "Only use the context above to answer if relevant. If the answer is not contained in it, do say so."
+        + "\n\n"
+        + "Note that the context is genuinely available to you. Even if you said earlier in this conversation that you couldn't access files, that's no longer true. Treat the above content as real."
     )
 
     return system_prompt + "\n\n" + context_block

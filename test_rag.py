@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 import pytest
 import voyageai.error as verr
+from fpdf import FPDF
+from pypdf import PdfWriter
 
 import rag
 from rag import (
@@ -13,6 +15,9 @@ from rag import (
     augment_system_prompt,
     read_file_as_string,
     Retriever,
+    read_pdf_as_string,
+    read_document_as_string,
+    MAX_PDF_SIZE_BYTES,
 )
 
 
@@ -215,3 +220,79 @@ def test_retrieval_more_than_k_chunks():
         result = retriever.retrieve("query")
 
     assert result == ["a", "b", "c"]
+
+
+def test_read_pdf_as_string(tmp_path):
+    path = os.path.join(tmp_path, "test.pdf")
+    pdf = FPDF()
+
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=12)
+    pdf.cell(text="First page")
+
+    pdf.add_page()
+    pdf.cell(text="Second page")
+
+    pdf.output(path)
+
+    assert read_pdf_as_string(path) == "First page\n\nSecond page"
+
+
+def test_read_document_if_pdf(tmp_path):
+    path = os.path.join(tmp_path, "test.pdf")
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=12)
+    pdf.cell(text="pdf text")
+    pdf.output(path)
+
+    assert read_document_as_string(path) == "pdf text"
+
+
+def test_read_document_if_text(tmp_path):
+    path = os.path.join(tmp_path, "file.txt")
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("plain text")
+
+    assert read_document_as_string(path) == "plain text"
+
+
+def test_read_document_pdf_exceeds_max_size(tmp_path):
+    path = os.path.join(tmp_path, "test.pdf")
+
+    with open(path, "wb") as f:
+        f.write(b"%PDF-")
+
+    with patch("os.path.getsize") as mock_function:
+        mock_function.return_value = MAX_PDF_SIZE_BYTES + 1
+
+        with pytest.raises(ValueError):
+            read_document_as_string(path)
+
+
+def test_index_document_encrypted_pdf(tmp_path):
+    path = os.path.join(tmp_path, "encrypted.pdf")
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    writer.encrypt(user_password="test")
+
+    with open(path, "wb") as f:
+        writer.write(f)
+
+    assert (
+        Retriever().index_document(path)
+        == "This PDF is encrypted and could not be read."
+    )
+
+
+def test_index_document_corrupted_pdf(tmp_path):
+    path = os.path.join(tmp_path, "corrupted.pdf")
+
+    with open(path, "wb") as f:
+        f.write(b"%PDF-non valid pdf structure")
+
+    assert (
+        Retriever().index_document(path)
+        == "This PDF is corrupted or could not be read."
+    )
