@@ -16,6 +16,8 @@ API_KEY = os.getenv("VOYAGE_API_KEY")
 MODEL = "voyage-4"
 TOP_K = 3
 MAX_CHUNKS = 300
+CHUNK_SIZE_WORDS = 175
+CHUNK_OVERLAP_WORDS = 40
 
 # Caps uploaded pdf size at 20MB
 MAX_PDF_SIZE_BYTES = 20 * 1024 * 1024
@@ -185,14 +187,28 @@ def read_document_as_string(path: str) -> str:
 
 def split_text_into_chunks(text: str) -> list[str]:
     """
-    Splits text into paragraph-sized chunks, stripping whitespace and discarding empty ones
+    Splits text into CHUNK_SIZE_WORDS-sized chunks. Each chunk overlaps with the next by CHUNK_OVERLAP_WORDS words
 
     :param text: The text to split
-    :return: A list of the non-empty and stripped paragraph chunks
+    :return: A list of the overlapping, fixed-size chunks
     """
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    # Split the text by whitespace
+    words = text.split()
 
-    return paragraphs
+    if not words:
+        return []
+
+    chunks = []
+    increment = CHUNK_SIZE_WORDS - CHUNK_OVERLAP_WORDS
+
+    for i in range(0, len(words), increment):
+        chunk_words = " ".join(words[i : i + CHUNK_SIZE_WORDS])
+        chunks.append(chunk_words)
+
+        if i + CHUNK_SIZE_WORDS >= len(words):
+            break
+
+    return chunks
 
 
 def embed_texts(

@@ -18,30 +18,39 @@ from rag import (
     read_pdf_as_string,
     read_document_as_string,
     MAX_PDF_SIZE_BYTES,
+    MAX_CHUNKS,
+    CHUNK_SIZE_WORDS,
+    CHUNK_OVERLAP_WORDS,
 )
 
 
 def test_split_text_into_chunks():
-    assert split_text_into_chunks("paragraph1\n\nparagraph2\n\nparagraph3") == [
-        "paragraph1",
-        "paragraph2",
-        "paragraph3",
+    words = [f"word{i}" for i in range(300)]
+    text = " ".join(words)
+
+    result = split_text_into_chunks(text)
+    increment = CHUNK_SIZE_WORDS - CHUNK_OVERLAP_WORDS
+
+    # Each chunk overlaps with the next by 40 words and holds up to 175 words
+    assert result == [
+        " ".join(words[0:CHUNK_SIZE_WORDS]),
+        " ".join(words[increment:300]),
     ]
+    assert (
+        result[0].split()[-CHUNK_OVERLAP_WORDS:]
+        == result[1].split()[:CHUNK_OVERLAP_WORDS]
+    )
 
 
-def test_split_text_single_paragraph():
-    assert split_text_into_chunks("paragraph") == ["paragraph"]
+def test_split_text_single_window():
+    words = [f"word{i}" for i in range(CHUNK_SIZE_WORDS - 1)]
+    text = " ".join(words)
+
+    assert split_text_into_chunks(text) == [text]
 
 
 def test_split_empty_string():
     assert split_text_into_chunks("") == []
-
-
-def test_split_text_extra_blank_lines():
-    assert split_text_into_chunks("paragraph1\n\n\n\nparagraph2") == [
-        "paragraph1",
-        "paragraph2",
-    ]
 
 
 def test_split_text_extra_whitespace():
@@ -147,7 +156,10 @@ def test_index_document_invalid_encoding(tmp_path):
 
 def test_index_document_exceeds_max_size(tmp_path):
     retriever = Retriever()
-    text_chunks = "\n\n".join(f"p{i}" for i in range(301))
+    word_count = (
+        MAX_CHUNKS * (CHUNK_SIZE_WORDS - CHUNK_OVERLAP_WORDS) + CHUNK_SIZE_WORDS
+    )
+    text_chunks = "\n\n".join(f"word{i}" for i in range(word_count))
     path = os.path.join(tmp_path, "large.txt")
 
     with open(path, "w", encoding="utf-8") as f:
@@ -177,15 +189,15 @@ def test_index_document_success(tmp_path):
     path = os.path.join(tmp_path, "file.txt")
 
     with open(path, "w", encoding="utf-8") as f:
-        f.write("chunk 1 \n\n chunk 2")
+        f.write("some text")
 
     with patch("rag.embed_texts") as mock_function:
-        mock_function.return_value = [[0.1, 0.2], [0.1, 0.2]]
+        mock_function.return_value = [[0.1, 0.2]]
         result = retriever.index_document(path)
 
     assert result is None
-    assert retriever.chunks == ["chunk 1", "chunk 2"]
-    assert retriever.embeddings == [[0.1, 0.2], [0.1, 0.2]]
+    assert retriever.chunks == ["some text"]
+    assert retriever.embeddings == [[0.1, 0.2]]
 
 
 def test_retrieval_error():
