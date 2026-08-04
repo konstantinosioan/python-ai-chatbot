@@ -3,3 +3,5 @@
 .idea/
 __pycache__/
 conversations/
+docs/build/doctrees/
+docs/build/singlehtml/

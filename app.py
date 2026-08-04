@@ -106,7 +106,8 @@ if st.session_state.chat_bot.history:
 
 
 def handle_document_upload() -> None:
-    """Used as a file_uploader callback for /loaddoc. Indexes the newly uploaded document
+    """
+    Used as a file_uploader callback for /loaddoc. Indexes the newly uploaded document
     into the retriever and stores the result message for display; clears the retriever if the file is removed
     """
     uploaded_file = st.session_state.document_upload
