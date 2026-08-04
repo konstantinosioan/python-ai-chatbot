@@ -14,6 +14,7 @@ from project import (
     load_conversation,
     trim_history,
     ChatBot,
+    build_retrieval_query,
 )
 
 SAMPLE_MESSAGES = [
@@ -224,3 +225,20 @@ def test_missing_api_key(monkeypatch):
 
     with pytest.raises(ValueError):
         project.ChatBot()
+
+
+def test_build_retrieval_query():
+    result = build_retrieval_query("current", SAMPLE_MESSAGES)
+
+    assert result == "Hey! Are you good? Yes! Bye! current"
+    assert "wassup" not in result
+
+
+def test_build_retrieval_query_short_history():
+    short_history = SAMPLE_MESSAGES[:1]
+
+    assert build_retrieval_query("current", short_history) == "wassup current"
+
+
+def test_build_retrieval_query_empty_history():
+    assert build_retrieval_query("current", []) == " current"

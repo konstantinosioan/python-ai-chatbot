@@ -5,3 +5,4 @@ voyageai
 numpy
 pypdf
 fpdf2
+streamlit

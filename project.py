@@ -2,8 +2,8 @@
 
 import os
 import json
+from collections.abc import Iterator
 import anthropic
-
 from anthropic.types import MessageParam
 from dotenv import load_dotenv
 from rag import Retriever, augment_system_prompt
@@ -69,7 +69,7 @@ class ChatBot:
         """
         Sends message to LLM, first grounding the system prompt in the loaded document's content if one exists.
         On success, both the prompt and response get appended to history and the history is trimmed.
-        On failure, it returns an error message without touching the history.
+        On failure, it prints and returns an error message without touching the history.
 
         :param message: The prompt from the user
         :param system_prompt: Optional argument. Used for configuring the chatbot's underlying behaviour and specifically making it act as a tutor
@@ -81,13 +81,21 @@ class ChatBot:
         # Grounds the prompt in the loaded document's content, if one exists
         system_prompt = self.retrieve_prompt_with_context(message, system_prompt)
 
+        print("\nTutor: ", end="")
+
         # These come from the anthropic's library documentation on handling errors
         try:
             response = get_llm_response(tmp_list, self._client, system_prompt)
         except anthropic.AnthropicError as e:
-            return explain_llm_error(e)
+            error_message = explain_llm_error(e)
+            print(error_message)
+            return error_message
         except ValueError:
-            return "No response received."
+            error_message = "No response received."
+            print(error_message)
+            return error_message
+
+        print()
 
         self.history.append({"role": "user", "content": message})
         self.history.append({"role": "assistant", "content": response})
@@ -100,29 +108,32 @@ class ChatBot:
         self.history.clear()
 
     def hold_conversation(self) -> None:
-        """The main loop: greets, reads user input and skips it if blank and checks for command use or routes to chat"""
+        """The main loop: greets, reads user input and skips it if blank and checks for command use or routes to chat. Exits gracefully on /quit or Ctrl+C"""
         print(
             "Welcome to your Socratic study assistant. It will guide you towards the answers to your questions without handing them over. Type /help to see available commands."
         )
 
         while True:
-            user_input = input("Prompt: ").strip()
+            try:
+                user_input = input("\nPrompt: ").strip()
 
-            if not user_input:
-                continue
+                if not user_input:
+                    continue
 
-            result = parse_command(user_input)
+                result = parse_command(user_input)
 
-            if result is None:
-                response = self.send_message(user_input)
-                print(response)
-            else:
-                command, argument = result
+                if result is None:
+                    self.send_message(user_input)
+                else:
+                    command, argument = result
 
-                if command == "/quit":
-                    break
+                    if command == "/quit":
+                        break
 
-                self.act_based_on_command(command, argument)
+                    self.act_based_on_command(command, argument)
+            except KeyboardInterrupt:
+                print("\n\nGoodbye!\n")
+                break
 
     def act_based_on_command(self, command: str, argument: str | None) -> None:
         """
@@ -200,35 +211,116 @@ class ChatBot:
 
     def respond_with_instruction(self, command: str, instruction: str) -> None:
         """
-        Shared helper for commands that need the LLM to do something by building an extended system prompt, sending it and printing the response
+        Shared helper for commands that need the LLM to do something by building an extended system prompt and sending it
 
         :param command: One of the existing commands; sent as the message content to the LLM
         :param instruction: The instruction to be concatenated with the base system prompt to produce different behaviour
         """
         system_prompt = SYSTEM_PROMPT + " For this response, " + instruction
-        response = self.send_message(command, system_prompt)
-        print(response)
+        self.send_message(command, system_prompt)
 
     def retrieve_prompt_with_context(self, message: str, system_prompt: str) -> str:
         """
-        Returns system prompt extended with additional context retrieved from loaded document.
+        Returns system prompt extended with additional context retrieved from loaded document, printing the retrieved chunks first.
         Falls back to the given system prompt unchanged if no document is loaded or retrieval fails.
 
-        :param message: The user's prompt used as the query for retrieval
+        :param message: The user's current message; combined with recent history to form the retrieval query
         :param system_prompt: The base system prompt to augment
         :return: The augmented system prompt if retrieval succeeds; the original system prompt otherwise
         """
-        if self.retriever is None or not self.retriever.chunks:
-            return system_prompt
+        augmented_prompt, result = self._retrieve_augmented_prompt(
+            message, system_prompt
+        )
 
-        result = self.retriever.retrieve(message)
+        if result is None:
+            return augmented_prompt
 
         # If something fails during retrieval
         if isinstance(result, str):
             print(f"(Couldn't retrieve context from the loaded document: {result})")
-            return system_prompt
+            return augmented_prompt
 
-        return augment_system_prompt(system_prompt, result)
+        print("Found the following in the loaded document:")
+        for chunk in result:
+            print(f"  - {chunk[:70]}...")
+
+        return augmented_prompt
+
+    def retrieve_context(self, message: str, system_prompt: str) -> str:
+        """
+        Used by the Streamlit UI (app.py), not the CLI.
+        Returns system prompt extended with additional context retrieved from loaded document.
+        Falls back to the given system prompt unchanged if no document is loaded or retrieval fails.
+
+        :param message: The user's current message; combined with recent history to form the retrieval query
+        :param system_prompt: The base system prompt to augment
+        :return: The augmented system prompt if retrieval succeeds; the original system prompt otherwise
+        """
+        augmented_prompt, _ = self._retrieve_augmented_prompt(message, system_prompt)
+
+        return augmented_prompt
+
+    def _retrieve_augmented_prompt(
+        self, message: str, system_prompt: str
+    ) -> tuple[str, None | list[str] | str]:
+        """
+        Shared retrieval logic used by both the printing and non-printing variants
+
+        :param message: The user's current message; combined with recent history to form the retrieval query
+        :param system_prompt: The base system prompt to augment
+        :return: A tuple consisting of the system prompt (augmented on success and unchanged on failure)
+            and either the list of chunks on success, an error message on failure or None if no document is loaded
+        """
+        if self.retriever is None or not self.retriever.chunks:
+            return system_prompt, None
+
+        result = self.retriever.retrieve(build_retrieval_query(message, self.history))
+
+        if isinstance(result, str):
+            return system_prompt, result
+
+        return augment_system_prompt(system_prompt, result), result
+
+    def stream_response(
+        self, message: str, system_prompt: str = SYSTEM_PROMPT
+    ) -> Iterator[str]:
+        """
+        Used by the Streamlit UI (app.py), not the CLI.
+        Sends message and system prompt to API, yielding response text chunks as they arrive.
+        On success, appends the user message and full response to history and trims it. On failure, it raises an exception without touching history
+
+        :param message: The prompt from the user
+        :param system_prompt: Optional argument. Used for configuring the chatbot's underlying behaviour
+        :raise anthropic.APIConnectionError: If any network connection failures occur
+        :raise anthropic.AuthenticationError: If the API key is invalid, expired or revoked
+        :raise anthropic.RateLimitError: If the rate limit is exceeded
+        :raise anthropic.APIStatusError: If any HTTP errors occur
+        :raise anthropic.AnthropicError: If anything other than the above goes wrong regarding the API
+        :raise ValueError: If the response is empty or has non-text content
+        :yield: Chunks of the response text as they arrive
+        """
+        tmp_list = self.history + [{"role": "user", "content": message}]
+        chunks = []
+
+        with self._client.messages.stream(
+            max_tokens=MAX_TOKENS,
+            messages=tmp_list,
+            model=MODEL,
+            system=system_prompt,
+        ) as stream:
+            for text in stream.text_stream:
+                yield text
+                chunks.append(text)
+
+            response = stream.get_final_message()
+
+        if not (response.content and response.content[0].type == "text"):
+            raise ValueError("No text content received from API.")
+
+        full_response = "".join(chunks)
+        self.history.append({"role": "user", "content": message})
+        self.history.append({"role": "assistant", "content": full_response})
+        self.history = trim_history(self.history, HISTORY_LIMIT)
 
 
 def main() -> None:
@@ -245,7 +337,7 @@ def get_llm_response(
     messages: list[MessageParam], client: anthropic.Anthropic, system_prompt: str
 ) -> str:
     """
-    Sends message history and system prompt to API and on success returns the response. On failure, it raises an exception
+    Sends message history and system prompt to API, streaming and printing the response text as it arrives. On success, returns the full response. On failure, it raises an exception
 
     :param messages: The list containing message history
     :param client: The Anthropic client
@@ -258,9 +350,16 @@ def get_llm_response(
     :raise ValueError: If the response is empty or has non-text content
     :return: The response string provided it comes back fine
     """
-    response = client.messages.create(
-        max_tokens=MAX_TOKENS, messages=messages, model=MODEL, system=system_prompt
-    )
+    with client.messages.stream(
+        max_tokens=MAX_TOKENS,
+        messages=messages,
+        model=MODEL,
+        system=system_prompt,
+    ) as stream:
+        for text in stream.text_stream:
+            print(text, end="", flush=True)
+
+        response = stream.get_final_message()
 
     if response.content and response.content[0].type == "text":
         return response.content[0].text
@@ -311,11 +410,11 @@ def explain_llm_error(error: anthropic.AnthropicError) -> str:
     """
     if isinstance(error, anthropic.APIConnectionError):
         return "We apologise as the server could not be reached."
-    elif isinstance(error, anthropic.AuthenticationError):
+    if isinstance(error, anthropic.AuthenticationError):
         return API_KEY_ERROR_MESSAGE
-    elif isinstance(error, anthropic.RateLimitError):
+    if isinstance(error, anthropic.RateLimitError):
         return "We apologise as there's too many requests at the minute."
-    elif isinstance(error, anthropic.APIStatusError):
+    if isinstance(error, anthropic.APIStatusError):
         return f"A status code of {error.status_code} was received."
 
     return f"Something went wrong: {error}"
@@ -368,6 +467,23 @@ def trim_history(messages: list[MessageParam], limit: int) -> list[MessageParam]
         trimmed = trimmed[1:]
 
     return trimmed
+
+
+def build_retrieval_query(current_message: str, history: list[MessageParam]) -> str:
+    """
+    Builds a string containing the user's current message and their last two exchanges with the assistant so that it has more context and returns it
+
+    :param current_message: The current prompt of the user
+    :param history: The list containing message history
+    :return: String containing the previous two user-assistant exchanges and the user's current message
+    """
+    previous_two_exchanges = history[-4:]
+
+    return (
+        " ".join(message["content"] for message in previous_two_exchanges)
+        + " "
+        + current_message
+    )
 
 
 if __name__ == "__main__":

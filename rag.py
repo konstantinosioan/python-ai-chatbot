@@ -14,10 +14,12 @@ load_dotenv()
 API_KEY = os.getenv("VOYAGE_API_KEY")
 
 MODEL = "voyage-4"
-TOP_K = 3
+RERANK_MODEL = "rerank-2.5"
+TOP_K = 5
 MAX_CHUNKS = 300
 CHUNK_SIZE_WORDS = 175
 CHUNK_OVERLAP_WORDS = 40
+RERANK_CANDIDATES = 15
 
 # Caps uploaded pdf size at 20MB
 MAX_PDF_SIZE_BYTES = 20 * 1024 * 1024
@@ -80,10 +82,10 @@ class Retriever:
 
     def retrieve(self, query: str) -> list[str] | str:
         """
-        Embeds the query and returns the top k most relevant indexed chunks, ranked by cosine similarity
+        Embeds the query, narrows the indexed chunks to the RERANK_CANDIDATES most similar by cosine similarity, then reranks them and returns the top TOP_K most relevant
 
         :param query: The text to find relevant chunks for
-        :return: A list of most relevant chunks (up to TOP_K) on success; friendly error message on failure
+        :return: A list of the most relevant chunks (up to TOP_K) on success; friendly error message on failure
         """
         result = self.embed_or_error([query], "query")
 
@@ -98,11 +100,12 @@ class Retriever:
         # The indices of the elements when the data is sorted by similarity in descending order
         sorted_indices = numpy.argsort(dot_products)[::-1]
 
-        # Take the top k related chunks
-        top_k_indices = sorted_indices[:TOP_K]
-        top_k_chunks = [self.chunks[i] for i in top_k_indices]
+        # Take the top RERANK_CANDIDATES related chunks
+        top_indices = sorted_indices[:RERANK_CANDIDATES]
+        candidate_chunks = [self.chunks[i] for i in top_indices]
 
-        return top_k_chunks
+        # Reranks them and returns the top TOK_K if all goes well
+        return self.rerank_or_error(query, candidate_chunks)
 
     def embed_or_error(
         self, texts: list[str], input_type: str
@@ -116,6 +119,22 @@ class Retriever:
         """
         try:
             return embed_texts(texts, self._client, input_type)
+        except voyageai.error.VoyageError as e:
+            return explain_api_error(e)
+
+    def rerank_or_error(self, query: str, candidates: list[str]) -> list[str] | str:
+        """
+        Reranks the candidate documents by their relevance to the query and returns the top TOP_K on success. On failure, it returns an error message
+
+        :param query: The search query
+        :param candidates: The list of candidate documents i.e. the documents retrieved by the search with embeddings
+        :return: The list of TOP_K candidate documents on success; friendly error message on failure
+        """
+        try:
+            reranking = self._client.rerank(
+                query, candidates, model=RERANK_MODEL, top_k=TOP_K
+            )
+            return [result.document for result in reranking.results]
         except voyageai.error.VoyageError as e:
             return explain_api_error(e)
 
@@ -240,9 +259,9 @@ def explain_api_error(error: voyageai.error.VoyageError) -> str:
     """
     if isinstance(error, voyageai.error.APIConnectionError):
         return "We apologise as the server could not be reached."
-    elif isinstance(error, voyageai.error.AuthenticationError):
+    if isinstance(error, voyageai.error.AuthenticationError):
         return "There has been an issue with the API key."
-    elif isinstance(error, voyageai.error.RateLimitError):
+    if isinstance(error, voyageai.error.RateLimitError):
         return "We apologise as there's too many requests at the minute."
 
     return f"Something went wrong: {error}"

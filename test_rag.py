@@ -1,7 +1,7 @@
 """Tests for rag.py"""
 
 import os
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 import voyageai.error as verr
@@ -31,7 +31,6 @@ def test_split_text_into_chunks():
     result = split_text_into_chunks(text)
     increment = CHUNK_SIZE_WORDS - CHUNK_OVERLAP_WORDS
 
-    # Each chunk overlaps with the next by 40 words and holds up to 175 words
     assert result == [
         " ".join(words[0:CHUNK_SIZE_WORDS]),
         " ".join(words[increment:300]),
@@ -200,7 +199,7 @@ def test_index_document_success(tmp_path):
     assert retriever.embeddings == [[0.1, 0.2]]
 
 
-def test_retrieval_error():
+def test_retrieval_embedding_error():
     retriever = Retriever()
 
     with patch("rag.embed_texts") as mock_function:
@@ -210,28 +209,44 @@ def test_retrieval_error():
     assert result == "We apologise as there's too many requests at the minute."
 
 
+def test_retrieval_reranking_error():
+    retriever = Retriever()
+    retriever.chunks = ["a", "b"]
+    retriever.embeddings = [[1, 0], [0.5, 0.5]]
+
+    with patch("rag.embed_texts") as mock_embed, patch(
+        "rag.voyageai.Client.rerank"
+    ) as mock_rerank:
+        mock_embed.return_value = [[1, 0]]
+        mock_rerank.side_effect = verr.RateLimitError()
+        result = retriever.retrieve("query")
+
+    assert result == "We apologise as there's too many requests at the minute."
+
+
 def test_retrieval_order():
     retriever = Retriever()
     retriever.chunks = ["medium relevant", "least relevant", "most relevant"]
+
+    # cosine similarity order would be most relevant, medium relevant, least relevant
     retriever.embeddings = [[0.5, 0.5], [-1, 0], [1, 0]]
 
-    with patch("rag.embed_texts") as mock_function:
-        mock_function.return_value = [[1, 0]]
+    mock_reranking = MagicMock(
+        results=[
+            MagicMock(document="least relevant"),
+            MagicMock(document="medium relevant"),
+            MagicMock(document="most relevant"),
+        ]
+    )
+
+    with patch("rag.embed_texts") as mock_embed, patch(
+        "rag.voyageai.Client.rerank"
+    ) as mock_rerank:
+        mock_embed.return_value = [[1, 0]]
+        mock_rerank.return_value = mock_reranking
         result = retriever.retrieve("query")
 
-    assert result == ["most relevant", "medium relevant", "least relevant"]
-
-
-def test_retrieval_more_than_k_chunks():
-    retriever = Retriever()
-    retriever.chunks = ["a", "b", "c", "d"]
-    retriever.embeddings = [[1, 0], [0.5, 0.5], [0.3, 0.3], [-1, 0]]
-
-    with patch("rag.embed_texts") as mock_function:
-        mock_function.return_value = [[1, 0]]
-        result = retriever.retrieve("query")
-
-    assert result == ["a", "b", "c"]
+    assert result == ["least relevant", "medium relevant", "most relevant"]
 
 
 def test_read_pdf_as_string(tmp_path):
