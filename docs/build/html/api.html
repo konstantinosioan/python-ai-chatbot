@@ -255,7 +255,7 @@
 <dl class="py method">
 <dt class="sig sig-object py" id="project.ChatBot.hold_conversation">
 <span class="sig-name descname"><span class="pre">hold_conversation</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#project.ChatBot.hold_conversation" title="Link to this definition">¶</a></dt>
-<dd><p>The main loop: greets, reads user input and skips it if blank and checks for command use or routes to chat. Exits gracefully on /quit or Ctrl+C</p>
+<dd><p>The main loop: greets, reads user input and skips it if blank and checks for command use or routes to chat. Exits gracefully on /quit, Ctrl+C or Ctrl+D</p>
 </dd></dl>
 
 <dl class="py method">
@@ -425,6 +425,20 @@ On success, appends the user message and full response to history and trims it. 
 </dd></dl>
 
 <dl class="py function">
+<dt class="sig sig-object py" id="project.is_valid_conversation">
+<span class="sig-prename descclassname"><span class="pre">project.</span></span><span class="sig-name descname"><span class="pre">is_valid_conversation</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">object</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#project.is_valid_conversation" title="Link to this definition">¶</a></dt>
+<dd><p>Checks that data resembles shape of a conversation history i.e. a list of dictionaries with <cite>role</cite> and <cite>content</cite> keys/values</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>data</strong> – The parsed JSON data being checked; it’s untrusted and unknown shaped at this stage hence the object type hint</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if its shape is valid; False otherwise</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
 <dt class="sig sig-object py" id="project.load_conversation">
 <span class="sig-prename descclassname"><span class="pre">project.</span></span><span class="sig-name descname"><span class="pre">load_conversation</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">MessageParam</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#project.load_conversation" title="Link to this definition">¶</a></dt>
 <dd><p>Reads a JSON file at a given path into the list containing message history</p>
@@ -438,6 +452,7 @@ On success, appends the user message and full response to history and trims it. 
 <li><p><strong>OSError</strong> – If any other thing goes wrong when reading file</p></li>
 <li><p><strong>json.JSONDecodeError</strong> – If the file is not a valid JSON document</p></li>
 <li><p><strong>UnicodeDecodeError</strong> – If the file is not UTF-8 encoded</p></li>
+<li><p><strong>ValueError</strong> – If the file is not a valid conversation</p></li>
 </ul>
 </dd>
 <dt class="field-odd">Returns<span class="colon">:</span></dt>
@@ -744,7 +759,8 @@ into the retriever and stores the result message for display; clears the retriev
 <dl class="py function">
 <dt class="sig sig-object py" id="app.handle_instruction_button">
 <span class="sig-prename descclassname"><span class="pre">app.</span></span><span class="sig-name descname"><span class="pre">handle_instruction_button</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">command</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">instruction</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#app.handle_instruction_button" title="Link to this definition">¶</a></dt>
-<dd><p>Used as a button callback. Builds an extended system prompt from the instruction and gets the full response, storing an error message for display if the call fails.</p>
+<dd><p>Used as a button callback. Builds an extended system prompt from the instruction, extends it further with context
+from a loaded document if one exists, and gets the full response, storing an error message for display if the call fails.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
@@ -825,6 +841,7 @@ into the retriever and stores the result message for display; clears the retriev
 <li><a class="reference internal" href="#project.build_retrieval_query"><code class="docutils literal notranslate"><span class="pre">build_retrieval_query()</span></code></a></li>
 <li><a class="reference internal" href="#project.explain_llm_error"><code class="docutils literal notranslate"><span class="pre">explain_llm_error()</span></code></a></li>
 <li><a class="reference internal" href="#project.get_llm_response"><code class="docutils literal notranslate"><span class="pre">get_llm_response()</span></code></a></li>
+<li><a class="reference internal" href="#project.is_valid_conversation"><code class="docutils literal notranslate"><span class="pre">is_valid_conversation()</span></code></a></li>
 <li><a class="reference internal" href="#project.load_conversation"><code class="docutils literal notranslate"><span class="pre">load_conversation()</span></code></a></li>
 <li><a class="reference internal" href="#project.main"><code class="docutils literal notranslate"><span class="pre">main()</span></code></a></li>
 <li><a class="reference internal" href="#project.parse_command"><code class="docutils literal notranslate"><span class="pre">parse_command()</span></code></a></li>

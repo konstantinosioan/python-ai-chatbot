@@ -8,7 +8,13 @@ from collections.abc import Callable
 import streamlit as st
 import anthropic
 
-from project import ChatBot, API_KEY_ERROR_MESSAGE, explain_llm_error, SYSTEM_PROMPT
+from project import (
+    ChatBot,
+    API_KEY_ERROR_MESSAGE,
+    explain_llm_error,
+    SYSTEM_PROMPT,
+    is_valid_conversation,
+)
 from rag import Retriever
 
 st.title("Study Assistant", text_alignment="center")
@@ -70,7 +76,7 @@ def handle_conversation_upload() -> None:
     st.session_state.conversation_filename = conversation_file.name
 
     try:
-        st.session_state.chat_bot.history = json.loads(conversation_file.getvalue())
+        data = json.loads(conversation_file.getvalue())
     except UnicodeDecodeError:
         st.session_state.conversation_upload_error = "The file is not UTF-8 encoded."
     except json.JSONDecodeError:
@@ -78,9 +84,15 @@ def handle_conversation_upload() -> None:
             "The file is not a valid JSON document."
         )
     else:
-        st.session_state.conversation_upload_success = (
-            "Conversation successfully loaded."
-        )
+        if is_valid_conversation(data):
+            st.session_state.chat_bot.history = data
+            st.session_state.conversation_upload_success = (
+                "Conversation successfully loaded."
+            )
+        else:
+            st.session_state.conversation_upload_error = (
+                "The file is not a valid conversation."
+            )
 
 
 st.sidebar.file_uploader(
@@ -155,17 +167,21 @@ def handle_reset_click() -> None:
 
 def handle_instruction_button(command: str, instruction: str) -> None:
     """
-    Used as a button callback. Builds an extended system prompt from the instruction and gets the full response, storing an error message for display if the call fails.
+    Used as a button callback. Builds an extended system prompt from the instruction, extends it further with context
+    from a loaded document if one exists, and gets the full response, storing an error message for display if the call fails.
 
     :param command: One of the existing commands; sent as the message content to the LLM
     :param instruction: The instruction to be concatenated with the base system prompt to produce different behaviour
     """
-    system_prompt = SYSTEM_PROMPT + " For this response, " + instruction
+    extended_prompt = SYSTEM_PROMPT + " For this response, " + instruction
+    extended_prompt = st.session_state.chat_bot.retrieve_context(
+        command, extended_prompt
+    )
 
     try:
         # This is not streamed as it runs as a callback before the chat_bot.history display loop re-executes
         # so streaming here would render in the wrong place and get duplicated
-        for _ in st.session_state.chat_bot.stream_response(command, system_prompt):
+        for _ in st.session_state.chat_bot.stream_response(command, extended_prompt):
             pass
     except anthropic.AnthropicError as e:
         st.session_state.instruction_error = explain_llm_error(e)

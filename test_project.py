@@ -15,6 +15,7 @@ from project import (
     trim_history,
     ChatBot,
     build_retrieval_query,
+    is_valid_conversation,
 )
 
 SAMPLE_MESSAGES = [
@@ -242,3 +243,27 @@ def test_build_retrieval_query_short_history():
 
 def test_build_retrieval_query_empty_history():
     assert build_retrieval_query("current", []) == " current"
+
+
+def test_is_valid_conversation():
+    valid_data = [{"role": "user", "content": "Hello"}]
+
+    assert is_valid_conversation(valid_data)
+
+
+def test_is_valid_conversation_empty():
+    assert is_valid_conversation([])
+
+
+def test_is_valid_conversation_not_list():
+    invalid = {"role": "user", "content": "Hello"}
+
+    assert not is_valid_conversation(invalid)
+
+
+def test_is_valid_conversation_item_not_dict():
+    assert not is_valid_conversation(["not a dict"])
+
+
+def test_is_valid_conversation_missing_key():
+    assert not is_valid_conversation([{"role": "user"}])

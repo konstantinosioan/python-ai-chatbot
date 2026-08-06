@@ -108,7 +108,7 @@ class ChatBot:
         self.history.clear()
 
     def hold_conversation(self) -> None:
-        """The main loop: greets, reads user input and skips it if blank and checks for command use or routes to chat. Exits gracefully on /quit or Ctrl+C"""
+        """The main loop: greets, reads user input and skips it if blank and checks for command use or routes to chat. Exits gracefully on /quit, Ctrl+C or Ctrl+D"""
         print(
             "Welcome to your Socratic study assistant. It will guide you towards the answers to your questions without handing them over. Type /help to see available commands."
         )
@@ -131,7 +131,7 @@ class ChatBot:
                         break
 
                     self.act_based_on_command(command, argument)
-            except KeyboardInterrupt:
+            except (KeyboardInterrupt, EOFError):
                 print("\n\nGoodbye!\n")
                 break
 
@@ -162,16 +162,19 @@ class ChatBot:
                 )
             case "/save":
                 if argument is not None:
-                    try:
-                        # Saving enforces one consistent directory
-                        path = os.path.join(CONVERSATIONS_DIR, argument)
-                        save_conversation(self.history, path)
-                    except PermissionError:
-                        print("You don't have permission for that.")
-                    except OSError as e:
-                        print(f"Something went wrong with the operation: {e}")
+                    if os.path.basename(argument) != argument:
+                        print("Please provide a filename only, not a path.")
                     else:
-                        print("Conversation successfully saved as a JSON file.")
+                        try:
+                            # Saving enforces one consistent directory
+                            path = os.path.join(CONVERSATIONS_DIR, argument)
+                            save_conversation(self.history, path)
+                        except PermissionError:
+                            print("You don't have permission for that.")
+                        except OSError as e:
+                            print(f"Something went wrong with the operation: {e}")
+                        else:
+                            print("Conversation successfully saved as a JSON file.")
                 else:
                     print(USAGE_HINT_MESSAGE)
             case "/load":
@@ -187,6 +190,8 @@ class ChatBot:
                         print("The file is not a valid JSON document.")
                     except UnicodeDecodeError:
                         print("The file is not UTF-8 encoded.")
+                    except ValueError:
+                        print("The file is not a valid conversation.")
                     else:
                         print("Conversation successfully loaded from file.")
                 else:
@@ -379,7 +384,8 @@ def parse_command(user_input: str) -> tuple[str, str | None] | None:
 
     if len(parts) == 0:
         return None
-    elif len(parts) == 1:
+
+    if len(parts) == 1:
         command = parts[0]
         argument = None
     else:
@@ -445,10 +451,16 @@ def load_conversation(path: str) -> list[MessageParam]:
     :raise OSError: If any other thing goes wrong when reading file
     :raise json.JSONDecodeError: If the file is not a valid JSON document
     :raise UnicodeDecodeError: If the file is not UTF-8 encoded
+    :raise ValueError: If the file is not a valid conversation
     :return: The message history read from the file
     """
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        result = json.load(f)
+
+    if not is_valid_conversation(result):
+        raise ValueError("The file is not a valid conversation.")
+
+    return result
 
 
 def trim_history(messages: list[MessageParam], limit: int) -> list[MessageParam]:
@@ -484,6 +496,31 @@ def build_retrieval_query(current_message: str, history: list[MessageParam]) -> 
         + " "
         + current_message
     )
+
+
+def is_valid_conversation(data: object) -> bool:
+    """
+    Checks that data resembles shape of a conversation history i.e. a list of dictionaries with `role` and `content` keys/values
+
+    :param data: The parsed JSON data being checked; it's untrusted and unknown shaped at this stage hence the object type hint
+    :return: True if its shape is valid; False otherwise
+    """
+    if not isinstance(data, list):
+        return False
+
+    for item in data:
+        if not isinstance(item, dict):
+            return False
+
+        if not (
+            "role" in item
+            and "content" in item
+            and isinstance(item["role"], str)
+            and isinstance(item["content"], str)
+        ):
+            return False
+
+    return True
 
 
 if __name__ == "__main__":
