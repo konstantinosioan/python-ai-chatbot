@@ -165,6 +165,9 @@ class ChatBot:
                     if os.path.basename(argument) != argument:
                         print("Please provide a filename only, not a path.")
                     else:
+                        # Normalise extension to always be .json
+                        argument = os.path.splitext(argument)[0] + ".json"
+
                         try:
                             # Saving enforces one consistent directory
                             path = os.path.join(CONVERSATIONS_DIR, argument)

@@ -3,6 +3,7 @@
 import os
 import json
 import tempfile
+from datetime import datetime
 from collections.abc import Callable
 
 import streamlit as st
@@ -112,7 +113,7 @@ if st.session_state.chat_bot.history:
     st.sidebar.download_button(
         label="Download conversation",
         data=conversation_json,
-        file_name="conversation.json",
+        file_name=f"conversation_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json",
         mime="application/json",
     )
 
